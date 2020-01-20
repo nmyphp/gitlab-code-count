@@ -2,13 +2,31 @@ package com.shtel.paas.gitlab.service;
 
 import com.alibaba.fastjson.JSONObject;
 import com.shtel.paas.gitlab.config.GitlabConfig;
-import com.shtel.paas.gitlab.entity.*;
+import com.shtel.paas.gitlab.entity.BranchesInfo;
+import com.shtel.paas.gitlab.entity.CommitInfo;
+import com.shtel.paas.gitlab.entity.CountResultInfo;
+import com.shtel.paas.gitlab.entity.GitlabInfo;
+import com.shtel.paas.gitlab.entity.HSSFWorkbookDTO;
+import com.shtel.paas.gitlab.entity.ProjectInfo;
+import com.shtel.paas.gitlab.entity.UserEventInfo;
+import com.shtel.paas.gitlab.entity.UserInfo;
 import com.shtel.paas.gitlab.entity.gitlab.GitlabAccessToken;
 import com.shtel.paas.gitlab.utils.ExcelUtil;
 import com.shtel.paas.gitlab.utils.FileDownloadUtil;
 import com.shtel.paas.gitlab.utils.GitlabAPI;
 import com.shtel.paas.gitlab.utils.HttpClientUtil;
-import org.apache.commons.lang3.StringUtils;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.UnsupportedEncodingException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
+import javax.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,15 +38,6 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-
-import javax.servlet.http.HttpServletResponse;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
-import java.text.SimpleDateFormat;
-import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 
 @Component
 @Service
@@ -75,9 +84,6 @@ public class GitlabService {
 
     /**
      * 浏览器下载代码统计的excel
-     *
-     * @param response
-     * @param gitlabInfo
      */
     public void codeCountExcelDownload(HttpServletResponse response, GitlabInfo gitlabInfo) {
 
@@ -90,7 +96,7 @@ public class GitlabService {
             os.flush();
             os.close();
         } catch (Exception e) {
-            e.printStackTrace();
+            logger.error("Error:", e);
         }
 
     }
@@ -98,8 +104,6 @@ public class GitlabService {
 
     /**
      * 代码统计
-     *
-     * @param gitlabInfo
      */
     public HashMap<String, Object> codeCountExcelSaveToLocal(GitlabInfo gitlabInfo) {
         logger.info("**************Start*************");
@@ -116,9 +120,6 @@ public class GitlabService {
 
     /**
      * 统计
-     *
-     * @param gitlabInfo
-     * @return
      */
     public HashMap<String, Object> codeCount(GitlabInfo gitlabInfo) {
 
@@ -148,7 +149,7 @@ public class GitlabService {
             saveUserHSSFWorkbooks(userDimension);
         }
         Map<String, List<CommitInfo>> projectCommitsMap = projectDimension.stream().collect(Collectors.groupingBy
-                (CommitInfo::getProjectName));
+            (CommitInfo::getProjectName));
         map.put("userDimension", userDimension);
         map.put("projectDimension", projectCommitsMap);
         return map;
@@ -156,11 +157,8 @@ public class GitlabService {
 
     /**
      * 判断UTC时间是否在时间段内
-     * @param periods
-     * @param UTCTime
-     * @return
      */
-    public static Boolean ifInPeriods (String[] periods, String UTCTime) {
+    public static Boolean ifInPeriods(String[] periods, String UTCTime) {
         Boolean resultFlag = false;
         int res0 = 0;
         int res1 = 0;
@@ -172,7 +170,7 @@ public class GitlabService {
                 res0 = lastActivity.compareTo(periods[0]);
                 res1 = lastActivity.compareTo(periods[1]);
             } catch (Exception e) {
-                logger.error("Error: " + e.getStackTrace());
+                logger.error("Error: ", e);
             }
         }
         if (res0 >= 0 && res1 <= 0) {
@@ -183,15 +181,9 @@ public class GitlabService {
 
     /**
      * 获取不同维度的数据
-     *
-     * @param usernames
-     * @param projectInfos
-     * @param periods
-     * @param userDimensionData
-     * @param projectDimensionData
      */
     public void getDataByDimension(List<String> usernames, List<ProjectInfo> projectInfos, String[] periods,
-                                   List<CountResultInfo> userDimensionData, List<CommitInfo> projectDimensionData) {
+        List<CountResultInfo> userDimensionData, List<CommitInfo> projectDimensionData) {
 
         projectInfos.forEach(projectInfo -> {
             List<CommitInfo> commitInfoTemp = asyncGetCommitInfo(projectInfo, periods);
@@ -202,7 +194,7 @@ public class GitlabService {
 
         if (projectDimensionData != null && projectDimensionData.size() > 0) {
             Map<String, List<CommitInfo>> commitInfoGroupEmail = projectDimensionData.stream().collect(Collectors
-                    .groupingBy(CommitInfo::getCommitter_email));
+                .groupingBy(CommitInfo::getCommitter_email));
             List<CountResultInfo> countResultInfos = formatToUserDimension(commitInfoGroupEmail, usernames);
             if (countResultInfos != null) {
                 userDimensionData.addAll(countResultInfos);
@@ -212,11 +204,9 @@ public class GitlabService {
 
     /**
      * 成员维度-数据格式化
-     *
-     * @param commitInfoMap
-     * @return
      */
-    public static List<CountResultInfo> formatToUserDimension(Map<String, List<CommitInfo>> commitInfoMap, List<String> usernames) {
+    public static List<CountResultInfo> formatToUserDimension(Map<String, List<CommitInfo>> commitInfoMap,
+        List<String> usernames) {
         List<CountResultInfo> countResultInfos = new ArrayList<>();
         Map<String, String> map = new HashMap<String, String>(8);
         map.put("additionsAll", "0");
@@ -228,22 +218,25 @@ public class GitlabService {
         commitInfoMap.forEach((key, value) -> {
             if (value != null && value.size() > 0) {
                 value.forEach(commitInfo -> {
-                    if (usernames != null && usernames.size() > 0 && usernames.contains(commitInfo.getCommitter_name())) {
+                    if (usernames != null && usernames.size() > 0 && usernames
+                        .contains(commitInfo.getCommitter_name())) {
                         map.put("isMark", "true");
                     }
                     map.put("username", commitInfo.getCommitter_name());
-                    map.put("additionsAll", String.valueOf(Integer.parseInt(commitInfo.getStats().getAdditions()) + Integer
+                    map.put("additionsAll",
+                        String.valueOf(Integer.parseInt(commitInfo.getStats().getAdditions()) + Integer
                             .parseInt(map.get("additionsAll"))));
-                    map.put("deletionsAll", String.valueOf(Integer.parseInt(commitInfo.getStats().getDeletions()) + Integer
+                    map.put("deletionsAll",
+                        String.valueOf(Integer.parseInt(commitInfo.getStats().getDeletions()) + Integer
                             .parseInt(map.get("deletionsAll"))));
                     map.put("totalAll", String.valueOf(Integer.parseInt(commitInfo.getStats().getTotal()) + Integer
-                            .parseInt(map.get("totalAll"))));
+                        .parseInt(map.get("totalAll"))));
                     map.put("projectCount", String.valueOf(1 + Integer
-                            .parseInt(map.get("projectCount"))));
+                        .parseInt(map.get("projectCount"))));
                     map.put("details", commitInfo.getProjectName() + "-[" + commitInfo.getLast_branch() + "]("
-                            + commitInfo.getStats().getAdditions() + ","
-                            + commitInfo.getStats().getDeletions() + "," + commitInfo.getStats().getTotal()
-                            + ")" + ";" + map.get("details"));
+                        + commitInfo.getStats().getAdditions() + ","
+                        + commitInfo.getStats().getDeletions() + "," + commitInfo.getStats().getTotal()
+                        + ")" + ";" + map.get("details"));
                 });
                 CountResultInfo countResultInfo = new CountResultInfo();
                 countResultInfo.setUserEmail(key);
@@ -268,9 +261,6 @@ public class GitlabService {
 
     /**
      * 获取HSSFWorkbook 多个sheet页
-     *
-     * @param projects
-     * @return
      */
     public HSSFWorkbookDTO getGitlabHSSFWorkbook(List<ProjectInfo> projects) {
 
@@ -281,7 +271,7 @@ public class GitlabService {
                     String fileName = projectInfo.getName();
                     ExcelUtil.createExcel(projectInfo.getCommitsInfo(), TITLE, fileName, hssfWorkbookDTO);
                 } catch (Exception e) {
-                    logger.error("Create an excel exception: " + e.getStackTrace());
+                    logger.error("Create an excel exception: ", e);
                 }
             });
         }
@@ -290,15 +280,10 @@ public class GitlabService {
 
     /**
      * 多线程保存excel
-     *
-     * @param commitsInfo
-     * @param hssfWorkbookAll
-     * @param sheetName
-     * @param date
      */
     @Async("taskExecutor")
     public void asyncSaveExcel(List<CommitInfo> commitsInfo, HSSFWorkbookDTO hssfWorkbookAll,
-                               String sheetName, long date) {
+        String sheetName, long date) {
         logger.info("Saving " + commitsInfo.get(0).getProjectName() + " excel to Local ...");
 
         try {
@@ -312,18 +297,16 @@ public class GitlabService {
 
             if (hssfWorkbookAll != null) {
                 // 总的excel添加数据
-                ExcelUtil.setHSSFWorkbook(sheetName, ExcelUtil.initContent(commitsInfo, TITLE_ALL, fileName), hssfWorkbookAll);
+                ExcelUtil.setHSSFWorkbook(sheetName, ExcelUtil.initContent(commitsInfo, TITLE_ALL, fileName),
+                    hssfWorkbookAll);
             }
         } catch (Exception e) {
-            logger.error("Create an excel exception: " + e.getStackTrace());
+            logger.error("Create an excel exception: ", e);
         }
     }
 
     /**
      * 获取单个项目提交信息
-     *
-     * @param projectInfo
-     * @return
      */
     public List<CommitInfo> asyncGetCommitInfo(ProjectInfo projectInfo, String[] periods) {
         logger.info("Querying " + projectInfo.getName() + " item submission record ...");
@@ -331,19 +314,19 @@ public class GitlabService {
         // 单个项目提交记录
         try {
             commitsInfo = groupCommitInfo(getProjectCommits(projectInfo.getId(), projectInfo.getLast_branch(),
-                    periods).get());
+                periods).get());
             if (commitsInfo != null && commitsInfo.size() > 0) {
                 commitsInfo.forEach(commitInfo -> {
                     commitInfo.setProject_id(Integer.parseInt(projectInfo.getId()));
                     commitInfo.setLast_branch(projectInfo.getLast_branch());
                     commitInfo.setProjectName_branch(projectInfo.getName() + "-[" + projectInfo
-                            .getLast_branch() + "]");
+                        .getLast_branch() + "]");
                     commitInfo.setProjectName(projectInfo.getName());
                 });
             }
         } catch (Exception e) {
             commitsInfo = null;
-            logger.error("Querying " + projectInfo.getName() + " item submission record error: " + e.getStackTrace());
+            logger.error("Querying " + projectInfo.getName() + " item submission record error: ", e);
         }
 
         return commitsInfo;
@@ -351,19 +334,15 @@ public class GitlabService {
 
     /**
      * 根据用户过滤用户的提交记录
-     *
-     * @param commitsInfo
-     * @param usernames
-     * @return
      */
     public List<CommitInfo> filterCommitInfoByUser(List<CommitInfo> commitsInfo, List<String> usernames) {
         List<CommitInfo> commitInfoList = new ArrayList<>();
         // 单个项目提交记录
         try {
             commitInfoList = commitsInfo.stream().filter(commitInfo -> usernames.contains(
-                    commitInfo.getCommitter_name())).collect(Collectors.toList());
+                commitInfo.getCommitter_name())).collect(Collectors.toList());
         } catch (Exception e) {
-            logger.error("Error: " + e.getStackTrace());
+            logger.error("Error: ", e);
         }
 
         return commitInfoList;
@@ -371,8 +350,6 @@ public class GitlabService {
 
     /**
      * 保存项目的excel
-     *
-     * @param commitsInfo
      */
     public void saveProjectHSSFWorkbooks(List<CommitInfo> commitsInfo) {
 
@@ -380,7 +357,8 @@ public class GitlabService {
         // 总计的excel
         HSSFWorkbookDTO hssfWorkbookAll = ExcelUtil.initHSSFWorkbook(sheetName, TITLE_ALL);
         long date = System.currentTimeMillis();
-        Map<String, List<CommitInfo>> map = commitsInfo.stream().collect(Collectors.groupingBy(CommitInfo::getProjectName));
+        Map<String, List<CommitInfo>> map = commitsInfo.stream()
+            .collect(Collectors.groupingBy(CommitInfo::getProjectName));
         map.forEach((key, value) -> asyncSaveExcel(value, hssfWorkbookAll, sheetName, date));
         hssfWorkbookAll.setExcelName("(全)");
         FileDownloadUtil.saveExcelToLocal(hssfWorkbookAll, date);
@@ -389,8 +367,6 @@ public class GitlabService {
 
     /**
      * 保存成员维度代码统计excel
-     *
-     * @param countResultInfos
      */
     public void saveUserHSSFWorkbooks(List<CountResultInfo> countResultInfos) {
         long date = System.currentTimeMillis();
@@ -398,25 +374,24 @@ public class GitlabService {
             HSSFWorkbookDTO hssfWorkbookDTO = ExcelUtil.createUserExcel(countResultInfos, USER_TITLE, "成员维度");
             FileDownloadUtil.saveExcelToLocal(hssfWorkbookDTO, date);
         } catch (Exception e) {
-            logger.error("Create an excel exception: " + e.getStackTrace());
+            logger.error("Create an excel exception: ", e);
         }
     }
 
     /**
      * 获取用户的accessToken
-     *
-     * @param gitlabInfo
-     * @return
      */
     public String getGitlabAccessToken(GitlabInfo gitlabInfo) {
 
         String accessToken;
         try {
-            GitlabAccessToken gitlabAccessToken = GitlabAPI.getAccessToken(gitlabInfo.getGitlabUrl(), GRANT_TYPE, gitlabInfo.getUsername(), gitlabInfo.getPassword());
+            GitlabAccessToken gitlabAccessToken = GitlabAPI
+                .getAccessToken(gitlabInfo.getGitlabUrl(), GRANT_TYPE, gitlabInfo.getUsername(),
+                    gitlabInfo.getPassword());
             accessToken = gitlabAccessToken.getAccessToken();
             return accessToken;
         } catch (IOException e) {
-            logger.error("Failed to get user token: " + e.getStackTrace());
+            logger.error("Failed to get user token: ", e);
             return null;
         }
     }
@@ -424,17 +399,13 @@ public class GitlabService {
 
     /**
      * 根据提交id获取提交记录详情 - 针对电信gitlab API获取不到行数
-     *
-     * @param projectId
-     * @param commitId
-     * @return
      */
     public CommitInfo getCommitsById(String projectId, String commitId) {
         logger.info("Querying commitId = " + commitId + " submission record ...");
         CommitInfo commitInfo = null;
         HttpHeaders httpHeaders = new HttpHeaders();
         String gitlabUrlOfCommitId = HttpClientUtil.parseUrl(gitlabConfig.getPath()
-                .getCommitInfoByProjectIdAndCommitId(), new HashMap<String, String>(4) {{
+            .getCommitInfoByProjectIdAndCommitId(), new HashMap<String, String>(4) {{
             put("address", gitLabAddress);
             put("projectId", projectId);
             put("commitId", commitId);
@@ -442,10 +413,11 @@ public class GitlabService {
             put("access_token", userToken);
         }});
         try {
-            ResponseEntity<String> response = restTemplate.exchange(gitlabUrlOfCommitId, HttpMethod.GET, new HttpEntity<String>(httpHeaders), String.class);
+            ResponseEntity<String> response = restTemplate
+                .exchange(gitlabUrlOfCommitId, HttpMethod.GET, new HttpEntity<String>(httpHeaders), String.class);
             commitInfo = JSONObject.parseObject(response.getBody(), CommitInfo.class);
         } catch (Exception e) {
-            logger.error("Queried commitId = " + commitId + " submission record filed! " + e.getStackTrace());
+            logger.error("Queried commitId = " + commitId + " submission record filed! ", e);
         }
         return commitInfo;
     }
@@ -453,13 +425,10 @@ public class GitlabService {
 
     /**
      * 获取单个项目的提交记录
-     *
-     * @param projectId
-     * @return
      */
     @Async("taskExecutor")
     public CompletableFuture<List<CommitInfo>> getProjectCommits(String projectId, String branchesName, String[]
-            periods) {
+        periods) {
 
         HashMap<String, String> params = new HashMap<String, String>(4) {{
             put("access_token", userToken);
@@ -476,10 +445,11 @@ public class GitlabService {
         }};
 
         // 格式化url
-        String gitlabUrl = HttpClientUtil.parseUrl(gitlabConfig.getPath().getProjectCommitsInfo(), new HashMap<String, String>(2) {{
-            put("address", gitLabAddress);
-            put("projectId", projectId);
-        }}, null);
+        String gitlabUrl = HttpClientUtil
+            .parseUrl(gitlabConfig.getPath().getProjectCommitsInfo(), new HashMap<String, String>(2) {{
+                put("address", gitLabAddress);
+                put("projectId", projectId);
+            }}, null);
 
         List<CommitInfo> commitInfoList = getAllByObject(gitlabUrl, params, CommitInfo.class);
 
@@ -498,9 +468,6 @@ public class GitlabService {
 
     /**
      * 获取用户列表
-     *
-     * @param gitlabInfo
-     * @return
      */
     public List<UserInfo> getUserList(GitlabInfo gitlabInfo) {
 
@@ -515,15 +482,16 @@ public class GitlabService {
         }};
 
         // 格式化url
-        String gitlabUrl = HttpClientUtil.parseUrl(gitlabConfig.getPath().getUserList(), new HashMap<String, String>(2) {{
-            put("address", gitLabAddress);
-        }}, null);
+        String gitlabUrl = HttpClientUtil
+            .parseUrl(gitlabConfig.getPath().getUserList(), new HashMap<String, String>(2) {{
+                put("address", gitLabAddress);
+            }}, null);
         List<UserInfo> userList = new ArrayList<>();
         try {
             userList = getAllByObject(gitlabUrl, params, UserInfo.class);
             logger.info("Query user list is successful!");
         } catch (Exception e) {
-            logger.error("Error: " + e.getStackTrace());
+            logger.error("Error: ", e);
         }
 
         return userList;
@@ -531,9 +499,6 @@ public class GitlabService {
 
     /**
      * 获取用户操作过的项目
-     *
-     * @param gitlabInfo
-     * @return
      */
     public List<ProjectInfo> getProjectListByUsers(GitlabInfo gitlabInfo) {
 
@@ -547,7 +512,8 @@ public class GitlabService {
         for (String username : usernames) {
             userEventInfos = getUserPushedEvents(username, null);
             if (userEventInfos != null && userEventInfos.size() > 0) {
-                userEventInfos.forEach(userEventInfo -> map.put(userEventInfo.getProject_id().toString(), EMPTY_STRING));
+                userEventInfos
+                    .forEach(userEventInfo -> map.put(userEventInfo.getProject_id().toString(), EMPTY_STRING));
             }
         }
 
@@ -566,8 +532,6 @@ public class GitlabService {
 
     /**
      * 设置项目/项目列表的分支信息
-     *
-     * @param projectInfos
      */
     public void setProjectBranchesInfo(ProjectInfo project, List<ProjectInfo> projectInfos) {
         if (project != null) {
@@ -588,10 +552,6 @@ public class GitlabService {
 
     /**
      * 获取用户的提交代码的events
-     *
-     * @param username
-     * @param periods
-     * @return
      */
 
     public List<UserEventInfo> getUserPushedEvents(String username, String[] periods) {
@@ -605,10 +565,11 @@ public class GitlabService {
         }};
 
         // 格式化url
-        String gitlabUrl = HttpClientUtil.parseUrl(gitlabConfig.getPath().getUserEvent(), new HashMap<String, String>(2) {{
-            put("address", gitLabAddress);
-            put("username", username);
-        }}, null);
+        String gitlabUrl = HttpClientUtil
+            .parseUrl(gitlabConfig.getPath().getUserEvent(), new HashMap<String, String>(2) {{
+                put("address", gitLabAddress);
+                put("username", username);
+            }}, null);
 
         try {
             List<UserEventInfo> userEventInfos;
@@ -621,7 +582,7 @@ public class GitlabService {
                 }
             }
         } catch (Exception e) {
-            logger.error("Error: " + e.getStackTrace());
+            logger.error("Error: ", e);
         }
 
         return returnUserEventInfos;
@@ -629,19 +590,17 @@ public class GitlabService {
 
     /**
      * 项目分支列表以及分支最新提交信息
-     *
-     * @param projectId
-     * @return
      */
     public List<BranchesInfo> getBranchesInfoListByProjectId(String projectId) {
 
         HashMap<String, String> params = new HashMap<String, String>(2) {{
             put("access_token", userToken);
         }};
-        String url = HttpClientUtil.parseUrl(gitlabConfig.getPath().getBranchesInfoListByProjectId(), new HashMap<String, String>(2) {{
-            put("address", gitLabAddress);
-            put("projectId", projectId);
-        }}, null);
+        String url = HttpClientUtil
+            .parseUrl(gitlabConfig.getPath().getBranchesInfoListByProjectId(), new HashMap<String, String>(2) {{
+                put("address", gitLabAddress);
+                put("projectId", projectId);
+            }}, null);
 
         List<BranchesInfo> branchesInfos = getAllByObject(url, params, BranchesInfo.class);
         return branchesInfos;
@@ -649,21 +608,17 @@ public class GitlabService {
 
     /**
      * 获取所有数据（针对分页的接口）
-     *
-     * @param url
-     * @param params
-     * @param objClass
-     * @param <T>
-     * @return
      */
     public static <T> List<T> getAllByObject(String url, HashMap<String, String> params, Class<T> objClass) {
 
         List<T> returnList = new ArrayList<T>();
 
-        String gitlabUrl = HttpClientUtil.parseUrl(url, new HashMap<String, String>(2){}, params);
+        String gitlabUrl = HttpClientUtil.parseUrl(url, new HashMap<String, String>(2) {
+        }, params);
         try {
             HttpHeaders httpHeaders = new HttpHeaders();
-            ResponseEntity<String> responseOfOne = restTemplate.exchange(gitlabUrl, HttpMethod.GET, new HttpEntity<String>(httpHeaders), String.class);
+            ResponseEntity<String> responseOfOne = restTemplate
+                .exchange(gitlabUrl, HttpMethod.GET, new HttpEntity<String>(httpHeaders), String.class);
             List<T> oneList = JSONObject.parseArray(responseOfOne.getBody(), objClass);
             if (oneList != null && oneList.size() > 0) {
                 returnList.addAll(oneList);
@@ -675,8 +630,10 @@ public class GitlabService {
             if (totalPages > 1) {
                 for (int i = 2; i <= totalPages; i++) {
                     params.put("page", String.valueOf(i));
-                    gitlabUrl = HttpClientUtil.parseUrl(url, new HashMap<String, String>(2){}, params);
-                    ResponseEntity<String> responseTemp = restTemplate.exchange(gitlabUrl, HttpMethod.GET, new HttpEntity<String>(httpHeaders), String.class);
+                    gitlabUrl = HttpClientUtil.parseUrl(url, new HashMap<String, String>(2) {
+                    }, params);
+                    ResponseEntity<String> responseTemp = restTemplate
+                        .exchange(gitlabUrl, HttpMethod.GET, new HttpEntity<String>(httpHeaders), String.class);
                     List<T> projectsTemp = JSONObject.parseArray(responseTemp.getBody(), objClass);
                     if (projectsTemp != null && projectsTemp.size() > 0) {
                         returnList.addAll(projectsTemp);
@@ -686,16 +643,13 @@ public class GitlabService {
 
             return returnList;
         } catch (Exception e) {
-            logger.error("Failed to get list request: " + url + " massage: " + e.getStackTrace());
+            logger.error("Failed to get list request: " + url + " massage: ", e);
             return returnList;
         }
     }
 
     /**
      * 获取BranchesInfos里面的最新时间提交的分支
-     *
-     * @param branchesInfos
-     * @return
      */
     public static String compareToTime(List<BranchesInfo> branchesInfos) {
         String branchesName = DEFAULT_BRANCH;
@@ -710,7 +664,8 @@ public class GitlabService {
                     if (i >= branchesInfos.size()) {
                         break;
                     }
-                    long tempTime = dateFormatOfUTC.parse(branchesInfos.get(i).getCommit().getCommitted_date()).getTime();
+                    long tempTime = dateFormatOfUTC.parse(branchesInfos.get(i).getCommit().getCommitted_date())
+                        .getTime();
                     if (tempTime > maxTime) {
                         maxTime = tempTime;
                         branchesInfoMax = branchesInfos.get(i);
@@ -720,7 +675,7 @@ public class GitlabService {
                     }
                 }
             } catch (Exception e) {
-                logger.error("Error: " + e.getStackTrace());
+                logger.error("Error:", e);
             }
 
         }
@@ -729,9 +684,6 @@ public class GitlabService {
 
     /**
      * 聚合单个项目提交信息
-     *
-     * @param commitsInfo
-     * @return
      */
     public static List<CommitInfo> groupCommitInfo(List<CommitInfo> commitsInfo) {
         logger.info("Aggregating submission records ...");
@@ -741,14 +693,19 @@ public class GitlabService {
                 if (map.containsKey(commitInfo.getCommitter_name())) {
                     CommitInfo temp = map.get(commitInfo.getCommitter_name());
                     try {
-                        String additions = String.valueOf(Integer.valueOf(commitInfo.getStats().getAdditions()) + Integer.valueOf(temp.getStats().getAdditions()));
-                        String deletions = String.valueOf(Integer.valueOf(commitInfo.getStats().getDeletions()) + Integer.valueOf(temp.getStats().getDeletions()));
-                        String total = String.valueOf(Integer.valueOf(commitInfo.getStats().getTotal()) + Integer.valueOf(temp.getStats().getTotal()));
+                        String additions = String.valueOf(
+                            Integer.valueOf(commitInfo.getStats().getAdditions()) + Integer
+                                .valueOf(temp.getStats().getAdditions()));
+                        String deletions = String.valueOf(
+                            Integer.valueOf(commitInfo.getStats().getDeletions()) + Integer
+                                .valueOf(temp.getStats().getDeletions()));
+                        String total = String.valueOf(Integer.valueOf(commitInfo.getStats().getTotal()) + Integer
+                            .valueOf(temp.getStats().getTotal()));
                         temp.getStats().setAdditions(additions);
                         temp.getStats().setDeletions(deletions);
                         temp.getStats().setTotal(total);
                     } catch (Exception e) {
-                        logger.error("Error: " + e.getStackTrace());
+                        logger.error("Error:", e);
                     }
                 } else {
                     // map中不存在，新建key，用来存放数据
@@ -762,9 +719,6 @@ public class GitlabService {
 
     /**
      * 根据项目id获取项目详情
-     *
-     * @param projectId
-     * @return
      */
     public ProjectInfo getProjectById(String projectId) {
         logger.info("Querying projectId = " + projectId + " info ...");
@@ -774,16 +728,18 @@ public class GitlabService {
         }};
 
         // 格式化url
-        String gitlabUrl = HttpClientUtil.parseUrl(gitlabConfig.getPath().getProjectInfo(), new HashMap<String, String>(2) {{
-            put("address", gitLabAddress);
-            put("projectId", projectId);
-        }}, params);
+        String gitlabUrl = HttpClientUtil
+            .parseUrl(gitlabConfig.getPath().getProjectInfo(), new HashMap<String, String>(2) {{
+                put("address", gitLabAddress);
+                put("projectId", projectId);
+            }}, params);
         HttpHeaders httpHeaders = new HttpHeaders();
         try {
-            ResponseEntity<String> response = restTemplate.exchange(gitlabUrl, HttpMethod.GET, new HttpEntity<String>(httpHeaders), String.class);
+            ResponseEntity<String> response = restTemplate
+                .exchange(gitlabUrl, HttpMethod.GET, new HttpEntity<String>(httpHeaders), String.class);
             projectInfo = JSONObject.parseObject(response.getBody(), ProjectInfo.class);
         } catch (Exception e) {
-            logger.error("Queried projectId = " + projectId + " info filed! " + e.getStackTrace());
+            logger.error("Queried projectId = " + projectId + " info filed! ", e);
         }
 
         return projectInfo;
@@ -791,9 +747,6 @@ public class GitlabService {
 
     /**
      * 发送响应流方法
-     *
-     * @param response
-     * @param fileName
      */
     public static void setResponseHeader(HttpServletResponse response, String fileName) {
 
@@ -801,7 +754,7 @@ public class GitlabService {
             try {
                 fileName = new String(fileName.getBytes(), "ISO8859-1");
             } catch (UnsupportedEncodingException e) {
-                e.printStackTrace();
+                logger.error("", e);
             }
             response.setContentType("application/octet-stream;charset=ISO8859-1");
             response.setHeader("Content-Disposition", "attachment;filename=" + fileName);
@@ -809,16 +762,13 @@ public class GitlabService {
             response.addHeader("Cache-Control", "no-cache");
 
         } catch (Exception ex) {
-            ex.printStackTrace();
+            logger.error("", ex);
         }
     }
 
 
     /**
      * 获取项目的成员
-     *
-     * @param projectId
-     * @return
      */
     public List<UserInfo> getUsersByProject(String projectId) {
 
@@ -829,19 +779,17 @@ public class GitlabService {
         }};
 
         // 格式化url
-        String gitlabUrl = HttpClientUtil.parseUrl(gitlabConfig.getPath().getUsersByProject(), new HashMap<String, String>(2) {{
-            put("address", gitLabAddress);
-            put("projectId", projectId);
-        }}, null);
+        String gitlabUrl = HttpClientUtil
+            .parseUrl(gitlabConfig.getPath().getUsersByProject(), new HashMap<String, String>(2) {{
+                put("address", gitLabAddress);
+                put("projectId", projectId);
+            }}, null);
         List<UserInfo> userInfoList = getAllByObject(gitlabUrl, params, UserInfo.class);
         return userInfoList;
     }
 
     /**
      * 获取所有项目列表
-     *
-     * @param gitlabInfo
-     * @return
      */
     public List<ProjectInfo> getProjectList(GitlabInfo gitlabInfo, Boolean getLastBranche) {
 
@@ -862,14 +810,14 @@ public class GitlabService {
 
         // 格式化url
         String gitlabUrl = HttpClientUtil.parseUrl(gitlabConfig.getPath().getProjectList(), new HashMap<String, String>
-                (2) {{
+            (2) {{
             put("address", gitLabAddress);
         }}, null);
 
         try {
             projectInfos = getAllByObject(gitlabUrl, params, ProjectInfo.class);
         } catch (Exception e) {
-            logger.error("Error: " + e.getStackTrace());
+            logger.error("Error: ", e);
         }
 
         if (getLastBranche) {
